@@ -37,8 +37,8 @@ promo:
   min_candidates: 15              # if fewer pass the thresholds, relax them by 1 (logged in output)
   relax_floor: 3                  # never relax thresholds below this
   max_candidates: 30              # cap sent to the cold-viewer step (controls AI cost)
-  allow_joins: false              # USER DECISION (2026-11-17): OFF. Held-out spot-check: joined clips
-                                  # 1 good of 13 vs single 3 good of 9 ("two unrelated scenes stitched")
+  allow_joins: false              # USER DECISION (2026-11-17): OFF. In testing, joined clips
+                                  # often stitched two unrelated scenes together
   join_penalty: 0.85              # USER DECISION: joined promos score x0.85 (continuous preferred)
   hook_segment_seconds: 8         # joined promos: length of the opening hook moment
   min_join_gap_seconds: 10        # joined promos: segments must be at least this far apart

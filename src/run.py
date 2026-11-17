@@ -2,7 +2,7 @@
 run.py - ONE command runs the whole pipeline on a script file or a folder of them.
 
     python src/run.py --input data/screenplays --config config.yaml
-    python src/run.py --input data/heldout/my_psycho_vampire.txt
+    python src/run.py --input data/kuku/<show folder>                    # folder of episode files
     python src/run.py --input data/screenplays --model gemini/gemini-3.8-flash   # live model swap
 
 Steps for each script file (each file = one show):
