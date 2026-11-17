@@ -1,0 +1,24 @@
+# Held-out spot-check - My Psycho Vampire (outputs/ranked_my_psycho_vampire.md)
+# Human rating of every ranked promo: good / average / bad + reason. Number = tool rank.
+1: average - strong hook, but the jump between the two parts is confusing
+2: good - shocking line, ends on a question
+3: bad - starts mid-scene, can't tell who is talking
+4: good - she's begging for her life, instantly gripping
+5: average - good threat, but you don't know who the brother is
+6: bad - jumps from a calm offer straight into panicked begging, feels like two different scenes
+7: bad - ends on a scream instead of a question, no hook to pull you forward
+8: average - mysterious "little brother" opener, but drags at 54s before the payoff line
+9: bad - feeding scene and brother-threat line don't connect at all
+10: bad - "eat your iron" has nothing to do with "is he really a monster," no through-line
+11: average - good hook, but the jump to the betrayal line is a hard left turn
+12: bad - begging-for-life and betrayal threat are two different conflicts jammed together
+13: average - weak generic opener, but the close line is genuinely creepy
+14: average - voice stays consistent, but neither line is a strong hook alone
+15: good - visceral opener, intriguing twist on the close
+16: bad - the close line contradicts itself, reads like a glitch
+17: good - clean death threat, gut-punch accusation at the end
+18: bad - switches speaker/context mid-clip without warning
+19: bad - two unrelated scenes stitched together, zero connection
+20: bad - hook is literally cut off mid-word, sounds broken
+21: bad - ends on that same mid-word cutoff, trails off instead of hooking
+22: average - generic opener, but the ending plea has real urgency despite running long
