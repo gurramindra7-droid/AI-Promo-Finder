@@ -8,11 +8,12 @@
 
 llm:
   model: groq/openai/gpt-oss-120b            # main model (user decision 2026-11-17: Gemini free tier = 20/day)
-  fallback_model: gemini/gemini-3.8-flash    # used if the main model fails (e.g. rate limit). Set to null to disable.
+  fallback_model: groq/openai/gpt-oss-20b    # used if the main model fails (e.g. daily limit). Gemini free = 20/day, too few. null = off.
   temperature: 0.2          # low = more consistent answers between runs
-  max_tokens: 5000          # Groq free tier counts prompt + max_tokens against 8,000 tokens/minute,
+  max_tokens: 4200          # Groq free tier counts prompt + max_tokens against 8,000 tokens/minute,
                             # so prompt (~2k) + 5,000 must stay under 8,000
   timeout_seconds: 120
+  reasoning_effort: low     # reasoning models (gpt-oss): less hidden thinking -> ~half the tokens
   json_retries: 1           # if the reply is not valid JSON, ask again this many times
   cache_dir: cache          # saved replies, so re-runs are free and fast
   use_cache: true

@@ -51,7 +51,7 @@ ARCHETYPES = [
 
 WINDOW_SECONDS = 240      # chunk size when the script has no episode markers
 CONTEXT_LINES = 6         # previous lines shown read-only
-MAX_CHUNK_CHARS = 3500  # episode-based scripts: max script text per AI call (free-tier token limits)
+MAX_CHUNK_CHARS = 6000# episode-based scripts: max script text per AI call (free-tier token limits)
 
 SYSTEM = """You are a senior promo editor for vertical microdramas (1-2 minute episodes, like ReelShort and DramaBox).
 Your job: read a script and score each line as a possible START (hook) or END (cliffhanger) of a 20-60 second social media promo.
@@ -77,6 +77,41 @@ Rules:
 Reply with JSON only:
 {{"beats": [{{"id": "L001", "hook": 0, "cliff": 0, "needs_context": 0, "archetype": "setup", "reason": "..."}}, ...]}}"""
 
+# Long screenplays (episode-based scripts, e.g. Kuku's 50-episode pack): same task, COMPACT
+# reply - one short list per line, a reason only for strong lines. Cuts output tokens ~3x so
+# a whole show fits a free tier's daily token budget. (YouTube compilations keep SYSTEM above,
+# so their saved answers stay valid.)
+SYSTEM_COMPACT = SYSTEM.split("Reply with JSON only:")[0].replace(
+    "- Be strict: most lines are 0-2. Reserve 4-5 for genuinely strong moments.",
+    "- Use the FULL 0-5 range within each part: its 2-3 strongest hook moments get hook 4-5 and its "
+    "2-3 strongest cut points get cliff 4-5; filler and camera-like description get 0-1.").replace(
+    "- reason: max 12 words.",
+    "- reason: max 10 words, ONLY when hook >= 3 or cliff >= 3; otherwise an empty string.") + \
+    """Reply with JSON only, one list per line in this exact order [id, hook, cliff, needs_context, archetype, reason]:
+{{"b": [["L001", 0, 1, 2, "setup", ""], ["L002", 4, 1, 1, "slap_violence", "public slap in front of guests"], ...]}}"""
+
+
+def normalize(data) -> dict:
+    """Accept every reply shape the models use - {"b": [[...]]}, {"beats": [{...}]}, rows as
+    lists or objects, or a bare list - and always return {"beats": [{id, hook, cliff, ...}]}.
+    (A model once answered {"beats": [[...]]}, which crashed a strict reader.)"""
+    if isinstance(data, list):
+        data = {"b": data}
+    if not isinstance(data, dict):
+        return data
+    rows = data.get("b") if isinstance(data.get("b"), list) else data.get("beats")
+    if not isinstance(rows, list):
+        return data
+    beats = []
+    for row in rows:
+        if isinstance(row, dict):
+            beats.append(row)
+        elif isinstance(row, list) and len(row) >= 5:
+            beats.append({"id": row[0], "hook": row[1], "cliff": row[2], "needs_context": row[3],
+                          "archetype": row[4], "reason": row[5] if len(row) > 5 else ""})
+        else:
+            beats.append({"id": None})      # caught by the validator below
+    return {"beats": beats}
 
 def make_chunks(lines: list[dict], has_markers: bool) -> list[list[dict]]:
     """Group timeline lines: by episode if marked, else by time window."""
@@ -145,8 +180,9 @@ def build_prompt(meta: dict, chunk: list[dict], context: list[dict], idx: int, t
 
 def _validator(chunk_ids: set[str]):
     def check(data) -> bool | str:
+        data = normalize(data)
         if not isinstance(data, dict) or not isinstance(data.get("beats"), list):
-            return 'Top level must be {"beats": [...]}.'
+            return 'Top level must be {"beats": [...]} (or {"b": [[...], ...]} in compact form).'
         bad_ids = [b.get("id") for b in data["beats"] if b.get("id") not in chunk_ids]
         if bad_ids:
             return f"These ids are not in SCORE THESE LINES: {bad_ids[:10]}. Use only listed ids."
@@ -166,7 +202,8 @@ def _validator(chunk_ids: set[str]):
 def tag_timeline(timeline: dict, llm: LLM, verbose: bool = True) -> dict:
     meta, lines = timeline["meta"], timeline["lines"]
     chunks = make_chunks(lines, meta.get("has_episode_markers", False))
-    system = SYSTEM.format(archetypes=", ".join(ARCHETYPES))
+    compact = bool(meta.get("has_episode_markers"))     # long screenplays -> compact replies
+    system = (SYSTEM_COMPACT if compact else SYSTEM).format(archetypes=", ".join(ARCHETYPES))
     by_id: dict[str, dict] = {}
     notes: list[str] = []
     prev: list[dict] = []
@@ -178,14 +215,26 @@ def tag_timeline(timeline: dict, llm: LLM, verbose: bool = True) -> dict:
             print(f"  tagging part {i + 1}/{len(chunks)}: {fmt_time(chunk[0]['start'])}-"
                   f"{fmt_time(chunk[-1]['end'])} ({len(chunk)} lines)")
         try:
-            data = llm.call_json(prompt, system=system, task="tagger", validate=_validator(ids))
-        except LLMError as e:
-            # One failed part shouldn't lose the whole show: its lines score 0 (never a
-            # guess) and the failure is written in the notes + run log for a re-run.
-            notes.append(f"part {i + 1} FAILED ({len(ids)} lines scored 0): {str(e)[:150]}")
-            print(f"  [tagger] part {i + 1} FAILED - lines scored 0, see notes")
-            prev = chunk
-            continue
+            data = normalize(llm.call_json(prompt, system=system, task="tagger", validate=_validator(ids)))
+        except LLMError:
+            # A long part can get its reply cut off (skipped lines, broken JSON). Self-heal:
+            # score the part again as two halves, each with a shorter reply.
+            print(f"  [tagger] part {i + 1} failed - retrying as two halves")
+            half = len(chunk) // 2
+            beats_ok: list[dict] = []
+            for j, piece in enumerate((chunk[:half], chunk[half:])):
+                ctx = prev[-CONTEXT_LINES:] if j == 0 else chunk[:half][-CONTEXT_LINES:]
+                p_ids = {l["id"] for l in piece}
+                try:
+                    part = normalize(llm.call_json(build_prompt(meta, piece, ctx, i, len(chunks)), system=system,
+                                                   task="tagger", validate=_validator(p_ids)))
+                    beats_ok += part["beats"]
+                except LLMError as e:
+                    # Still failing: these lines score 0 (never a guess) and the failure is
+                    # written in the notes + run log, so a re-run can fill it.
+                    notes.append(f"part {i + 1}.{j + 1} FAILED ({len(p_ids)} lines scored 0): {str(e)[:150]}")
+                    print(f"  [tagger] part {i + 1}.{j + 1} FAILED - lines scored 0, see notes")
+            data = {"beats": beats_ok}
         for b in data["beats"]:
             arch = b.get("archetype") if b.get("archetype") in ARCHETYPES else "other"
             by_id[b["id"]] = {

@@ -33,6 +33,10 @@ from parser import show_name         # noqa: E402  (only to find the output file
 RAW_TIME = re.compile(r"^(?:Start:\s*)?[\[(]?\s*(\d{1,2}(?::\d{2}){1,2}(?:[.,]\d{1,3})?)")
 
 
+# an end time written on the line: "End: (01:55.70)" (Kuku) or "[00:04.0 - 00:07.5]" / "-->" (ranges, SRT)
+RAW_END = re.compile(r"(?:End:\s*\(|(?:-->|\s-\s|–|—)\s*)(\d{1,2}(?::\d{2}){1,2}(?:[.,]\d{1,3})?)")
+
+
 def secs(t: str) -> float:
     s = 0.0
     for p in t.replace(",", ".").split(":"):
@@ -79,10 +83,19 @@ def main(script: str) -> int:
                 err(f"{tag}: start {ep_start} != raw line {first['src_line']}: {raw_line[:40]!r}")
             if first["ep"] != last["ep"]:
                 err(f"{tag}: segment runs across episodes {first['ep']}->{last['ep']}")
-            # 4. end not past the next caption's start
-            nxt = next((t for t in starts_sorted if t > last["start"]), None)
-            if nxt is not None and s["end"] > nxt + 1e-6:
-                err(f"{tag}: segment end {s['end']} spills past next caption at {nxt}")
+            # 4. the end time. If the script WRITES an end ("End: (01:55.70)", "[00:04 - 00:07]"),
+            #    the cut must end exactly there (screenplay lines may overlap the next line).
+            #    If it doesn't (captions), the cut must not spill past the next line's start.
+            last_raw = raw_of(last)[last["src_line"] - 1]
+            written_end = RAW_END.search(last_raw)
+            ep_end = s.get("ep_end", s["end"])
+            if written_end:
+                if abs(secs(written_end.group(1)) - ep_end) > 0.01:
+                    err(f"{tag}: end {ep_end} != end written in the script ({written_end.group(1)})")
+            else:
+                nxt = next((t for t in starts_sorted if t > last["start"]), None)
+                if nxt is not None and s["end"] > nxt + 1e-6:
+                    err(f"{tag}: segment end {s['end']} spills past next caption at {nxt}")
             # 3. order / no overlap
             if s["start"] < prev_end:
                 err(f"{tag}: segments overlap or out of order")

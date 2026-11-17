@@ -46,9 +46,11 @@ def save(name: str, data: dict) -> Path:
 
 
 def run_one(name: str, files: list[Path], cfg: dict, config_path: str, model: str | None,
-            use_cache: bool = True) -> dict:
+            use_cache: bool = True, cold_model: str | None = None) -> dict:
     stem = name
     llm = LLM(config_path, model_override=model, use_cache=use_cache)
+    # Optional: a different (e.g. cheaper) model for the stranger test - a simpler task.
+    cold_llm = LLM(config_path, model_override=cold_model, use_cache=use_cache) if cold_model else llm
     times: dict[str, float] = {}
     label = files[0].name if len(files) == 1 else f"{name}/ ({len(files)} episode files)"
     print(f"\n=== {label}  (model: {llm.model}) ===")
@@ -79,7 +81,7 @@ def run_one(name: str, files: list[Path], cfg: dict, config_path: str, model: st
         return {"show": stem, "error": "no candidates"}
 
     t = time.time()
-    judged = run_cold_viewer(cands["candidates"], llm, workers=cfg.get("cold_viewer", {}).get("workers", 4))
+    judged = run_cold_viewer(cands["candidates"], cold_llm, workers=cfg.get("cold_viewer", {}).get("workers", 4))
     cands["candidates"] = judged
     save(f"cold_{stem}.json", cands)
     times["4_cold_viewer"] = time.time() - t
@@ -90,6 +92,14 @@ def run_one(name: str, files: list[Path], cfg: dict, config_path: str, model: st
     t = time.time()
     ranked = rank(judged, m.get("duration_seconds", 0), cfg["promo"], cfg["ranking"])
     usage = llm.usage_summary()
+    if cold_llm is not llm:   # add the stranger-test model's calls into one run summary
+        cu = cold_llm.usage_summary()
+        usage["cold_viewer_model"] = cold_llm.model
+        for k in ("calls_total", "calls_cached", "prompt_tokens", "completion_tokens", "cost_usd", "seconds"):
+            usage[k] = round(usage[k] + cu[k], 5)
+        for model_name, n in cu["answered_by"].items():   # (not `m`: that name holds the show's meta)
+            usage["answered_by"][model_name] = usage["answered_by"].get(model_name, 0) + n
+        usage["calls_by_task"].update(cu["calls_by_task"])
     run_info = {"model": llm.model, "selection": cands["thresholds_used"], "relaxed": cands["relaxed"],
                 "usage": usage}
     paths = write_outputs(ranked, m, stem, run_info)
@@ -122,6 +132,7 @@ def main() -> None:
     ap.add_argument("--input", required=True, help="a script file, or a folder of script files")
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--model", help="override llm.model from config.yaml, e.g. openai/gpt-4.1")
+    ap.add_argument("--cold-model", help="use a different model for the stranger test, e.g. groq/openai/gpt-oss-20b")
     ap.add_argument("--no-cache", action="store_true", help="ignore saved AI answers")
     args = ap.parse_args()
 
@@ -135,7 +146,8 @@ def main() -> None:
     logs = []
     for name, files in shows:
         try:
-            logs.append(run_one(name, files, cfg, args.config, args.model, use_cache=not args.no_cache))
+            logs.append(run_one(name, files, cfg, args.config, args.model, use_cache=not args.no_cache,
+                                cold_model=args.cold_model))
         except Exception as e:   # one bad show shouldn't stop the others
             print(f"FAILED on {name}: {e}")
             logs.append({"show": name, "error": str(e)})

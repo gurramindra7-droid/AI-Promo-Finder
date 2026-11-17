@@ -87,6 +87,7 @@ class LLM:
         self.temperature: float = cfg.get("temperature", 0.2)
         self.max_tokens: int = cfg.get("max_tokens", 8192)
         self.timeout: int = cfg.get("timeout_seconds", 120)
+        self.reasoning_effort: str | None = cfg.get("reasoning_effort")   # e.g. "low" for gpt-oss
         self.json_retries: int = cfg.get("json_retries", 1)
         self.use_cache: bool = cfg.get("use_cache", True) if use_cache is None else use_cache
         self.cache_dir = PROJECT_ROOT / cfg.get("cache_dir", "cache")
@@ -124,6 +125,8 @@ class LLM:
             max_tokens=self.max_tokens,
             timeout=self.timeout,
         )
+        if self.reasoning_effort:   # less hidden "thinking" = fewer tokens (dropped where unsupported)
+            kwargs["reasoning_effort"] = self.reasoning_effort
         try:
             resp = litellm.completion(response_format={"type": "json_object"}, **kwargs)
         except Exception as e:  # some models don't support JSON mode -> plain call
@@ -156,6 +159,9 @@ class LLM:
                 msg = str(e).lower()
                 if "request too large" in msg:
                     raise   # waiting won't help: this single request is over the per-minute limit
+                if "exceeded your current quota" in msg or "perday" in msg or "tokens per day" in msg \
+                        or "requests per day" in msg:
+                    raise   # a DAILY quota is used up (e.g. Gemini free = 20/day): no point waiting minutes
                 busy = any(k in msg for k in ("503", "429", "unavailable", "high demand",
                                               "rate limit", "resource_exhausted", "timeout"))
                 if not busy or i == len(waits):

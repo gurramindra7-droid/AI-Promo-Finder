@@ -82,8 +82,16 @@ In `config.yaml` change `llm.model`, or override on the command line:
 ```
 
 Any [LiteLLM](https://docs.litellm.ai/docs/providers) model name works. All AI calls go through
-`src/llm.py`, which validates JSON, retries, waits on rate limits, falls back to a backup model,
-caches answers, and logs which model really answered.
+`src/llm.py`, which validates JSON, retries, waits as long as the provider asks on rate limits,
+gives up at once on a used-up daily quota, falls back to a backup model, caches answers, and logs
+which model really answered (`answered_by` in the run log).
+
+A cheaper model for the simpler stranger test: `--cold-model groq/openai/gpt-oss-20b`.
+
+**Free-tier note.** A 50-episode screenplay needs roughly 200,000 tokens, about one Groq model's
+free daily budget. To fit it, long screenplays use compact AI replies, `reasoning_effort: low`,
+and each AI call is sized by characters (a part whose reply gets cut off is retried as two halves).
+A paid key removes all of this.
 
 ### Editor app
 
@@ -121,12 +129,18 @@ show) so the tool can be tried without any private data.
 .venv/Scripts/python eval/verify_outputs.py <input>          # independent check of every timestamp vs the raw script
 .venv/Scripts/python eval/baseline_keywords.py <input>       # no-AI keyword baseline, same candidate rules
 .venv/Scripts/python eval/evaluate.py <input>                # precision@10, recall, cut-point error vs an answer key
+.venv/Scripts/python eval/blind_review.py make <input>       # blind human review: AI top 10 vs keyword top 10, shuffled
+.venv/Scripts/python eval/blind_review.py score <input>      # ...then reveal which method picked what
 ```
 
 - **`verify_outputs.py`** re-reads the original files (without the parser) and checks that every
-  start time, hook and cliffhanger is really in the script, lengths are 20-60s, cuts don't spill
-  into the next line, and the stranger never saw timestamps or the show name. It was itself tested
-  by planting errors (all caught).
+  start time, hook and cliffhanger is really in the script, each end equals the script's written
+  `End:` time (or doesn't spill into the next caption when none is written), lengths are 20-60s,
+  and the stranger never saw timestamps or the show name. It was itself tested by planting errors
+  (all caught).
+- **`blind_review.py`** is for shows with no answer key: a person rates both methods' promos
+  without knowing which method picked which. The sheet and key quote the script, so they are
+  written to `data/reviews/` (private).
 - **`evaluate.py`** compares the ranked list with an answer key (`data/my_picks.txt`, format in the
   file's docstring) and with the keyword baseline, and lists misses and false alarms.
 
@@ -137,9 +151,11 @@ show) so the tool can be tried without any private data.
 | Setting | Value | Reason |
 |---|---|---|
 | `llm.model` | `groq/openai/gpt-oss-120b` | free tier with ~1,000 requests/day (Gemini Flash free = 20/day) |
+| `llm.fallback_model` | `groq/openai/gpt-oss-20b` | separate daily budget, used when the main model is limited |
+| `llm.max_tokens` / `reasoning_effort` | 4200 / `low` | prompt + reply must fit Groq's free 8,000 tokens per minute |
 | `promo.min/max_seconds` | 20 / 60 | the brief |
 | `promo.selection` | `relative`, top 10% (widens to 25% if too few) | model-independent |
-| `promo.allow_joins` | `false` | a held-out spot check showed joined clips mostly failed (1 good of 13) |
+| `promo.allow_joins` | `false` | in testing, joined clips mostly mixed unrelated scenes |
 | `ranking.*` | early bonus x1.05, spoiler guard x0.9, 25-45s preferred | posting strategy; all editable |
 
 ---
@@ -159,7 +175,7 @@ show) so the tool can be tried without any private data.
 ```
 src/        adapter.py (formats) · parser.py (timeline, episodes) · tagger.py (AI scores)
             candidates.py (clips) · cold_viewer.py (stranger test) · ranker.py · llm.py (model wrapper) · run.py
-eval/       verify_outputs.py · baseline_keywords.py · evaluate.py · heldout_config.yaml · heldout_spotcheck.txt
+eval/       verify_outputs.py · baseline_keywords.py · evaluate.py · blind_review.py
 samples/    synthetic screenplay for trying the tool
 app.py      Streamlit editor app
 config.yaml settings (model in one line)
